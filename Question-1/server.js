@@ -39,7 +39,11 @@ app.get('/stocks/:ticker', async (req, res) => {
 
 // ✅ Route 2: Get Correlation Between Two Stocks
 app.get('/stockcorrelation', async (req, res) => {
-    const { minutes, ticker } = req.query;
+    let { minutes, ticker } = req.query;
+
+    if (typeof ticker === 'string') {
+        ticker = ticker.split(',');
+    }
 
     if (!ticker || ticker.length !== 2) {
         return res.status(400).json({ error: "Provide exactly two tickers" });
@@ -58,6 +62,10 @@ app.get('/stockcorrelation', async (req, res) => {
             })
         ]);
 
+        // Log the responses for inspection
+        console.log("Response for stock 1:", res1.data);
+        console.log("Response for stock 2:", res2.data);
+
         const data1 = res1.data;
         const data2 = res2.data;
 
@@ -65,6 +73,7 @@ app.get('/stockcorrelation', async (req, res) => {
         const { prices1, prices2 } = aligned;
 
         const correlation = calculateCorrelation(prices1, prices2);
+
         const avg1 = prices1.reduce((a, b) => a + b, 0) / prices1.length;
         const avg2 = prices2.reduce((a, b) => a + b, 0) / prices2.length;
 
@@ -83,26 +92,46 @@ app.get('/stockcorrelation', async (req, res) => {
         });
 
     } catch (error) {
-        console.error("Error computing correlation:", error.response?.data || error.message);
+        console.error("Error details:", error.response ? error.response.data : error.message);
         return res.status(500).json({ error: "Failed to fetch stock data" });
     }
 });
 
-function alignTimestamps(prices1, prices2) {
-    const map2 = new Map(prices2.map(p => p.lastUpdatedAt.slice(0, 16), p => p.price));
-    const commonTimestamps = prices1
-        .filter(p1 => map2.has(p1.lastUpdatedAt.slice(0, 16)));
 
-    const pricesAligned1 = [];
-    const pricesAligned2 = [];
 
-    commonTimestamps.forEach(p1 => {
-        pricesAligned1.push(p1.price);
-        pricesAligned2.push(map2.get(p1.lastUpdatedAt.slice(0, 16)));
-    });
+function alignTimestamps(data1, data2) {
+    const tolerance = 60000; // 1 minute tolerance (in milliseconds)
 
-    return { prices1: pricesAligned1, prices2: pricesAligned2 };
+    let i = 0;
+    let j = 0;
+    const alignedData1 = [];
+    const alignedData2 = [];
+
+    while (i < data1.length && j < data2.length) {
+        const time1 = new Date(data1[i].lastUpdatedAt).getTime();
+        const time2 = new Date(data2[j].lastUpdatedAt).getTime();
+
+        // If the timestamps are within tolerance (1 minute), align them
+        if (Math.abs(time1 - time2) <= tolerance) {
+            alignedData1.push(data1[i].price);
+            alignedData2.push(data2[j].price);
+            i++;
+            j++;
+        }
+        // Move to the next timestamp based on which one is earlier
+        else if (time1 < time2) {
+            i++;
+        } else {
+            j++;
+        }
+    }
+
+    return {
+        prices1: alignedData1,
+        prices2: alignedData2
+    };
 }
+
 
 function calculateCorrelation(X, Y) {
     const n = X.length;
